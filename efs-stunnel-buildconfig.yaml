@@ -1,0 +1,23 @@
+---
+apiVersion: v1
+kind: BuildConfig
+metadata:
+  name: efs-stunnel
+spec:
+  output:
+    to:
+      kind: ImageStreamTag
+      name: efs-stunnel:latest
+  postCommit: {}
+  resources: {}
+  runPolicy: Serial
+  source:
+    type: Binary
+  strategy:
+    type: Docker
+    dockerStrategy:
+      from:
+        kind: ImageStreamTag
+        name: rhel7:latest
+        namespace: openshift
+  triggers: []

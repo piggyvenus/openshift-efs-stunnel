@@ -1,0 +1,43 @@
+---
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+  labels:
+    component: efs-stunnel
+  name: efs-stunnel
+  namespace: openshift-efs-manager
+spec:
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      component: efs-stunnel
+  template:
+    metadata:
+      labels:
+        component: efs-stunnel
+    spec:
+      containers:
+      - name: efs-stunnel
+        #image: docker-registry.default.svc:5000/openshift/mysql
+        image: 172.30.1.1:5000/openshift-efs-manager/efs-stunnel:latest
+        imagePullPolicy: Always
+        #livenessProbe:
+        #readinessProbe:
+        resources:
+          requests:
+            cpu: 100m
+            memory: 50Mi
+          limits:
+            cpu: 200m
+            memory: 50Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      hostNetwork: true
+      restartPolicy: Always
+      securityContext: {}
+      serviceAccount: efs-stunnel
+      serviceAccountName: efs-stunnel
+      terminationGracePeriodSeconds: 10
+  updateStrategy:
+    type: RollingUpdate
