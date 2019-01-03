@@ -11,6 +11,7 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 NAMESPACE = None
+REGION = None
 SUBNETS = []
 KUBEAPI = None
 
@@ -30,7 +31,7 @@ OCSPaia = no
 TIMEOUTbusy = 20
 TIMEOUTclose = 0
 accept = 127.0.0.1:{port}
-checkHost = {target_ip}
+checkHost = {filesystem_id}.efs.{region}.amazonaws.com
 client = yes
 connect = {target_ip}:2049
 delay = yes
@@ -41,7 +42,7 @@ verifyChain = yes
 '''
 
 def set_globals():
-    global KUBEAPI, NAMESPACE, SUBNETS
+    global KUBEAPI, NAMESPACE, REGION, SUBNETS
 
     with open('/run/secrets/kubernetes.io/serviceaccount/namespace') as f:
         NAMESPACE = f.read()
@@ -62,6 +63,9 @@ def set_globals():
         r = requests.get("http://169.254.169.254/latest/meta-data/network/interfaces/macs/{}subnet-id".format(mac))
         SUBNETS.append(r.text)
 
+    r = requests.get("http://169.254.169.254/latest/dynamic/instance-identity/document")
+    REGION = r.json().get('region')
+
 def get_target_ip_from_efs_target(efs_target):
     target_ip = None
     for subnet, ip in efs_target['mount_target_ip_by_subnet'].items():
@@ -77,6 +81,7 @@ def write_stunnel_conf(conf):
             f.write(STUNNEL_EFS_TARGET_OPT.format(
                 filesystem_id = filesystem_id,
                 port = efs_target['stunnel_port'],
+                region = REGION,
                 target_ip = get_target_ip_from_efs_target(efs_target)
             ))
         except Exception as e:

@@ -85,6 +85,7 @@ def manage_stunnel_conf():
             del efs_stunnel_target['not_found']
         else:
             logging.info("New filesystem {}".format(file_system_id))
+            # FIXME - Add new root dir persistent volume and persistent volume claim
             while next_stunnel_port in used_stunnel_ports:
                 next_stunnel_port += 1
             efs_stunnel_target = {
@@ -112,6 +113,7 @@ def manage_stunnel_conf():
 
     for file_system_id, efs_stunnel_target in efs_stunnel_targets.items():
         if 'not_found' in efs_stunnel_target:
+            # FIXME - Remove root dir persistent volume and persistent volume claim
             del efs_stunnel_targets[file_system_id]
             logging.info("Removing EFS {}".format(file_system-id))
             conf_changed = True
@@ -261,6 +263,8 @@ def create_pv_for_pvc(pvc):
 
     logging.info("Created persistent volume {}".format(pv_name))
 
+    # FIXME - initialize_pv_mountpoint(...)
+
 def pvc_has_been_rejected(pvc):
     annotations = pvc.metadata.annotations
     return (
@@ -297,6 +301,7 @@ def manage_persistentvolumeclaims_loop():
 
 def delete_persistentvolume(pv):
     logging.info("Deleting persistent volume {}".format(pv.metadata.name))
+    # FIXME - remove_pv_mountpoint(...)
     KUBEAPI.delete_persistent_volume(pv.metadata.name, {})
 
 def manage_persistentvolumes():

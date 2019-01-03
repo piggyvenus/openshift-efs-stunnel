@@ -1,0 +1,74 @@
+---
+apiVersion: v1
+kind: Template
+metadata:
+  name: efs-stunnel-build
+parameters:
+- name: GITREPO
+  value: https://github.com/gnuthought/openshift-efs-stunnel.git
+objects:
+- apiVersion: v1
+  kind: BuildConfig
+  metadata:
+    name: efs-manager
+  spec:
+    output:
+      to:
+        kind: ImageStreamTag
+        name: efs-manager:latest
+    postCommit: {}
+    resources: {}
+    runPolicy: Serial
+    source:
+      git:
+        uri: ${GITREPO}
+      contextDir: efs-manager
+    strategy:
+      type: Docker
+      dockerStrategy:
+        from:
+          kind: ImageStreamTag
+          name: rhel7:latest
+          namespace: openshift
+    triggers: []
+
+- apiVersion: v1
+  kind: BuildConfig
+  metadata:
+    name: efs-stunnel
+  spec:
+    output:
+      to:
+        kind: ImageStreamTag
+        name: efs-stunnel:latest
+    postCommit: {}
+    resources: {}
+    runPolicy: Serial
+    source:
+      git:
+        uri: ${GITREPO}
+      contextDir: efs-stunnel
+    strategy:
+      type: Docker
+      dockerStrategy:
+        from:
+          kind: ImageStreamTag
+          name: rhel7:latest
+          namespace: openshift
+    triggers: []
+
+- apiVersion: image.openshift.io/v1
+  kind: ImageStream
+  metadata:
+    name: efs-manager
+  spec:
+    lookupPolicy:
+      local: false
+
+- apiVersion: image.openshift.io/v1
+  kind: ImageStream
+  metadata:
+    name: efs-stunnel
+  spec:
+    lookupPolicy:
+      local: false

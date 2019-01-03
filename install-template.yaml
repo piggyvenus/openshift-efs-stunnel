@@ -1,0 +1,206 @@
+---
+apiVersion: v1
+kind: Template
+metadata:
+  name: efs-stunnel
+parameters:
+- name: NAMESPACE
+  value: openshift-efs-stunnel
+- name: REGISTRY
+  value: docker-registry.default.svc:5000
+- name: EFS_MANAGER_IMAGE
+  value: openshift-efs-stunnel/efs-manager
+- name: EFS_MANAGER_IMAGE_TAG
+  value: latest
+- name: EFS_STUNNEL_IMAGE
+  value: openshift-efs-stunnel/efs-stunnel
+- name: EFS_STUNNEL_IMAGE_TAG
+  value: latest
+objects:
+- apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: efs-manager
+    namespace: "${NAMESPACE}"
+
+- apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: efs-stunnel
+    namespace: "${NAMESPACE}"
+
+- apiVersion: rbac.authorization.k8s.io/v1
+  kind: RoleBinding
+  metadata:
+    name: edit-efs-manager
+    namespace: "${NAMESPACE}"
+  roleRef:
+    apiGroup: rbac.authorization.k8s.io
+    kind: ClusterRole
+    name: edit
+  subjects:
+  - kind: ServiceAccount
+    name: efs-manager
+    namespace: "${NAMESPACE}"
+
+- apiVersion: rbac.authorization.k8s.io/v1
+  kind: ClusterRoleBinding
+  metadata:
+    name: storage-admin-efs-manager
+  roleRef:
+    apiGroup: rbac.authorization.k8s.io
+    kind: ClusterRole
+    name: storage-admin
+  subjects:
+  - kind: ServiceAccount
+    name: efs-manager
+    namespace: "${NAMESPACE}"
+
+- apiVersion: rbac.authorization.k8s.io/v1
+  kind: RoleBinding
+  metadata:
+    name: view-efs-stunnel
+    namespace: "${NAMESPACE}"
+  roleRef:
+    apiGroup: rbac.authorization.k8s.io
+    kind: ClusterRole
+    name: view
+  subjects:
+  - kind: ServiceAccount
+    name: efs-stunnel
+    namespace: "${NAMESPACE}"
+
+- apiVersion: extensions/v1beta1
+  kind: Deployment
+  metadata:
+    labels:
+      component: efs-manager
+    name: efs-manager
+    namespace: "${NAMESPACE}"
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        component: efs-manager
+    strategy:
+      type: Recreate
+    template:
+      metadata:
+        labels:
+          component: efs-manager
+      spec:
+        containers:
+        - name: efs-manager
+          image: "${REGISTRY}/${EFS_MANAGER_IMAGE}:${EFS_MANAGER_IMAGE_TAG}"
+          imagePullPolicy: Always
+          #livenessProbe:
+          #readinessProbe:
+          resources:
+            limits:
+              cpu: 200m
+              memory: 100Mi
+            requests:
+              cpu: 100m
+              memory: 100Mi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+        nodeSelector:
+          node-role.kubernetes.io/infra: "true"
+        restartPolicy: Always
+        securityContext: {}
+        serviceAccount: efs-manager
+        serviceAccountName: efs-manager
+        terminationGracePeriodSeconds: 30
+
+- apiVersion: extensions/v1beta1
+  kind: DaemonSet
+  metadata:
+    labels:
+      component: efs-stunnel
+    name: efs-stunnel
+    namespace: "${NAMESPACE}"
+  spec:
+    revisionHistoryLimit: 3
+    selector:
+      matchLabels:
+        component: efs-stunnel
+    template:
+      metadata:
+        labels:
+          component: efs-stunnel
+      spec:
+        containers:
+        - name: efs-stunnel
+          image: "${REGISTRY}/${EFS_STUNNEL_IMAGE}:${EFS_STUNNEL_IMAGE_TAG}"
+          imagePullPolicy: Always
+          #livenessProbe:
+          #readinessProbe:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 50Mi
+            limits:
+              cpu: 200m
+              memory: 50Mi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+        dnsPolicy: ClusterFirst
+        hostNetwork: true
+        restartPolicy: Always
+        securityContext: {}
+        serviceAccount: efs-stunnel
+        serviceAccountName: efs-stunnel
+        terminationGracePeriodSeconds: 10
+    updateStrategy:
+      type: RollingUpdate
+
+- apiVersion: security.openshift.io/v1
+  kind: SecurityContextConstraints
+  metadata:
+    annotations:
+      kubernetes.io/description: >-
+        SCC for efs-stunnel, which requires access to the hostnetwork. This SCC
+        is based off of hostnetwork.
+    name: efs-stunnel
+  allowHostDirVolumePlugin: false
+  allowHostIPC: false
+  allowHostNetwork: true
+  allowHostPID: false
+  allowHostPorts: true
+  allowPrivilegeEscalation: true
+  allowPrivilegedContainer: false
+  allowedCapabilities: null
+  defaultAddCapabilities: null
+  fsGroup:
+    type: MustRunAs
+  groups: []
+  priority: 99
+  readOnlyRootFilesystem: false
+  requiredDropCapabilities:
+  - KILL
+  - MKNOD
+  - SETUID
+  - SETGID
+  runAsUser:
+    type: MustRunAsRange
+  seLinuxContext:
+    type: MustRunAs
+  supplementalGroups:
+    type: MustRunAs
+  users:
+  - system:serviceaccount:${NAMESPACE}:efs-stunnel
+  volumes:
+  - configMap
+  - downwardAPI
+  - emptyDir
+  - persistentVolumeClaim
+  - projected
+  - secret
+
+- kind: StorageClass
+  apiVersion: storage.k8s.io/v1
+  metadata:
+    name: efs-stunnel
+  provisioner: gnuthought.com/efs-stunnel
+  parameters: {}
+  reclaimPolicy: Delete
