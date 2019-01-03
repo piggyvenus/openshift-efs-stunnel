@@ -10,7 +10,8 @@ RUN yum install -y \
       python-requests \
       python-setuptools \
       openssl-devel \
-      tcp_wrappers-devel \
+      tcp_wrappers-devel && \
+    yum clean all
 
 RUN cd /usr/local/src && \
     curl -s -o stunnel.tar.gz $STUNNEL_ARCHIVE_URL && \

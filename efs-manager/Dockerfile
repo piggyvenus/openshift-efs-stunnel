@@ -5,7 +5,8 @@ USER 0
 RUN yum install -y \
       python \
       python-requests \
-      python-setuptools
+      python-setuptools && \
+    yum clean all
 
 RUN easy_install pip && \
     pip install --ignore-installed \
