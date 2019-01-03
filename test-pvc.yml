@@ -1,9 +1,10 @@
+---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   finalizers:
   - kubernetes.io/pvc-protection
-  name: test
+  name: efs-stunnel-test
 spec:
   accessModes:
   - ReadWriteMany
@@ -13,5 +14,5 @@ spec:
   selector:
     matchLabels:
       file_system_id: fs-71840908
-      subdir: foo
+      subdir: test
   storageClassName: efs-stunnel

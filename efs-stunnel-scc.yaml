@@ -34,7 +34,7 @@ seLinuxContext:
 supplementalGroups:
   type: MustRunAs
 users:
-- system:serviceaccount:openshift-efs-manager:efs-stunnel
+- system:serviceaccount:openshift-efs-stunnel:efs-stunnel
 volumes:
 - configMap
 - downwardAPI
