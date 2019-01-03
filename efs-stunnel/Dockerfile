@@ -25,7 +25,6 @@ RUN cd /usr/local/src && \
 RUN easy_install pip && \
     pip install --ignore-installed \
       awscli \
-      boto3 \
       kubernetes
 
 COPY efs-utils.crt /etc/amazon/efs/efs-utils.crt

@@ -2,11 +2,9 @@
 
 import kubernetes
 import os
-import os.path
 import requests
 import signal
 import subprocess
-import time
 import yaml
 
 import urllib3
