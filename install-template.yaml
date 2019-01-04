@@ -29,6 +29,12 @@ objects:
     name: efs-stunnel
     namespace: "${NAMESPACE}"
 
+- apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: efs-worker
+    namespace: "${NAMESPACE}"
+
 - apiVersion: rbac.authorization.k8s.io/v1
   kind: RoleBinding
   metadata:
@@ -41,6 +47,20 @@ objects:
   subjects:
   - kind: ServiceAccount
     name: efs-manager
+    namespace: "${NAMESPACE}"
+
+- apiVersion: rbac.authorization.k8s.io/v1
+  kind: RoleBinding
+  metadata:
+    name: edit-efs-worker
+    namespace: "${NAMESPACE}"
+  roleRef:
+    apiGroup: rbac.authorization.k8s.io
+    kind: ClusterRole
+    name: edit
+  subjects:
+  - kind: ServiceAccount
+    name: efs-worker
     namespace: "${NAMESPACE}"
 
 - apiVersion: rbac.authorization.k8s.io/v1
@@ -157,11 +177,11 @@ objects:
 - apiVersion: security.openshift.io/v1
   kind: SecurityContextConstraints
   metadata:
+    name: efs-stunnel
     annotations:
       kubernetes.io/description: >-
         SCC for efs-stunnel, which requires access to the hostnetwork. This SCC
         is based off of hostnetwork.
-    name: efs-stunnel
   allowHostDirVolumePlugin: false
   allowHostIPC: false
   allowHostNetwork: true
@@ -189,6 +209,46 @@ objects:
     type: MustRunAs
   users:
   - system:serviceaccount:${NAMESPACE}:efs-stunnel
+  volumes:
+  - configMap
+  - downwardAPI
+  - emptyDir
+  - persistentVolumeClaim
+  - projected
+  - secret
+
+- apiVersion: security.openshift.io/v1
+  kind: SecurityContextConstraints
+  metadata:
+    name: efs-stunnel-worker
+    annotations:
+      kubernetes.io/description: >-
+        SCC for efs-worker pods, which need to run as root to manage
+        mountpoints within EFS volumes. Based on the standard anyuid SCC.
+  allowHostDirVolumePlugin: false
+  allowHostIPC: false
+  allowHostNetwork: false
+  allowHostPID: false
+  allowHostPorts: false
+  allowPrivilegeEscalation: true
+  allowPrivilegedContainer: false
+  allowedCapabilities: null
+  defaultAddCapabilities: null
+  fsGroup:
+    type: RunAsAny
+  groups: []
+  priority: 99
+  readOnlyRootFilesystem: false
+  requiredDropCapabilities:
+  - MKNOD
+  runAsUser:
+    type: RunAsAny
+  seLinuxContext:
+    type: MustRunAs
+  supplementalGroups:
+    type: RunAsAny
+  users:
+  - system:serviceaccount:openshift-efs-stunnel:efs-worker
   volumes:
   - configMap
   - downwardAPI
