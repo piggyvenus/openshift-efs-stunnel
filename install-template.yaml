@@ -66,11 +66,11 @@ objects:
 - apiVersion: rbac.authorization.k8s.io/v1
   kind: ClusterRoleBinding
   metadata:
-    name: storage-admin-efs-manager
+    name: system:${NAMESPACE}:controller:persistent-volume-binder
   roleRef:
     apiGroup: rbac.authorization.k8s.io
     kind: ClusterRole
-    name: storage-admin
+    name: system:controller:persistent-volume-binder
   subjects:
   - kind: ServiceAccount
     name: efs-manager
@@ -262,5 +262,6 @@ objects:
   metadata:
     name: efs-stunnel
   provisioner: gnuthought.com/efs-stunnel
-  parameters: {}
+  parameters:
+    default_file_system_id: auto
   reclaimPolicy: Delete

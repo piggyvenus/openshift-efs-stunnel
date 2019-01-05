@@ -20,12 +20,15 @@ logging.basicConfig(
 )
 
 BASE_STUNNEL_PORT = 20490
-STORAGE_CLASS_NAME = 'efs-stunnel'
+STORAGE_CLASSES = {}
+STORAGE_PROVISIONER = 'gnuthought.com/efs-stunnel'
 
 EFSAPI = None
 KUBEAPI = None
+STORAGEAPI = None
 NAMESPACE = None
 
+EFS_POLLING_INTERVAL = int(os.environ.get('EFS_POLLING_INTERVAL', 300))
 WORKER_IMAGE = os.environ.get('WORKER_IMAGE', 'rhel7:latest')
 
 EFS_STUNNEL_TARGETS = None
@@ -35,7 +38,7 @@ DEPROVISION_BACKOFF = {}
 PROVISION_BACKOFF_INTERVAL = 60
 
 def set_globals():
-    global EFSAPI, KUBEAPI, NAMESPACE
+    global EFSAPI, KUBEAPI, STORAGEAPI, NAMESPACE
 
     r = requests.get("http://169.254.169.254/latest/dynamic/instance-identity/document")
     response_json = r.json()
@@ -51,6 +54,9 @@ def set_globals():
         KUBEAPI = kubernetes.client.CoreV1Api(
             kubernetes.client.ApiClient(kubeconfig)
         )
+        STORAGEAPI = kubernetes.client.StorageV1Api(
+            kubernetes.client.ApiClient(kubeconfig)
+        )
 
     with open('/run/secrets/kubernetes.io/serviceaccount/namespace') as f:
         NAMESPACE = f.read()
@@ -64,7 +70,7 @@ def create_root_pv_and_pvc(file_system_id, stunnel_port):
             metadata = kubernetes.client.V1ObjectMeta(
                 name = "efs-stunnel-{}".format(file_system_id),
                 annotations = {
-                    "volume.beta.kubernetes.io/storage-provisioner": "gnuthought.com/efs-stunnel"
+                    "volume.beta.kubernetes.io/storage-provisioner": STORAGE_PROVISIONER
                 }
             ),
             spec = kubernetes.client.V1PersistentVolumeClaimSpec(
@@ -74,11 +80,11 @@ def create_root_pv_and_pvc(file_system_id, stunnel_port):
                 ),
                 selector = kubernetes.client.V1LabelSelector(
                     match_labels = {
-                        "file_system_id": file_system_id,
-                        "root_key": root_key
+                        'file_system_id': file_system_id,
+                        'root_key': root_key
                     }
                 ),
-                storage_class_name = STORAGE_CLASS_NAME
+                storage_class_name = "efs-stunnel-system"
             )
         )
     )
@@ -87,11 +93,12 @@ def create_root_pv_and_pvc(file_system_id, stunnel_port):
         metadata = kubernetes.client.V1ObjectMeta(
             name = "efs-stunnel-{}".format(file_system_id),
             labels = {
-                "file_system_id": file_system_id,
-                "root_key": root_key
+                'file_system_id': file_system_id,
+                'root_key': root_key
             },
             annotations = {
-                "pv.kubernetes.io/provisioned-by": "gnuthought.com/efs-stunnel"
+                'pv.kubernetes.io/provisioned-by': STORAGE_PROVISIONER,
+                'efs-stunnel.gnuthought.com/file-system-id': file_system_id
             }
         ),
         spec = kubernetes.client.V1PersistentVolumeSpec(
@@ -111,7 +118,7 @@ def create_root_pv_and_pvc(file_system_id, stunnel_port):
                 server = '127.0.0.1'
             ),
             persistent_volume_reclaim_policy = 'Delete',
-            storage_class_name = STORAGE_CLASS_NAME
+            storage_class_name = "efs-stunnel-system"
         )
     ))
 
@@ -239,8 +246,8 @@ def manage_stunnel_loop():
         try:
             manage_stunnel_conf()
         except Exception as e:
-            logging.error("Error in manage_stunnel_loop: " + str(e))
-        time.sleep(300)
+            logging.exception("Error in manage_stunnel_loop: " + str(e))
+        time.sleep(EFS_POLLING_INTERVAL)
 
 def provision_backoff(pvc):
     for pvc_uid, last_attempt in PROVISION_BACKOFF.items():
@@ -250,45 +257,74 @@ def provision_backoff(pvc):
     PROVISION_BACKOFF[pvc.metadata.uid] = time.time()
     return ret
 
+def get_file_system_id_from_pvc(pvc):
+    sc = STORAGE_CLASSES[pvc.spec.storage_class_name]
+
+    file_system_id = pvc.spec.selector.match_labels.get('file_system_id', None)
+    if not file_system_id:
+        if sc['default_file_system_id']:
+            file_system_id = sc['default_file_system_id']
+        else:
+            return None
+
+    if sc['file_system_ids']:
+        # Restrict access to efs to specific volumes
+        if file_system_id == 'auto':
+            return sc['file_system_ids'][0]
+        elif file_system_id in sc['file_system_ids']:
+            return file_system_id
+        else:
+            return None
+
+    if file_system_id == 'auto' and EFS_STUNNEL_TARGETS:
+        return EFS_STUNNEL_TARGETS.keys()[0]
+    else:
+        return file_system_id
+
 def pvc_reject_reason(pvc):
     if not pvc.spec.selector:
-        return "Missing spec.selector"
+        return "Missing spec.selector", True
     if not pvc.spec.selector.match_labels:
-        return "Missing spec.selector.match_labels"
-    if not pvc.spec.selector.match_labels['file_system_id']:
-        return "Missing spec.selector.match_labels.file_system_id"
-    if not pvc.spec.selector.match_labels['file_system_id'] in EFS_STUNNEL_TARGETS:
-        return "Unknown file_system_id {}".format(pvc.spec.selector.match_labels['file_system_id'])
-    if not pvc.spec.selector.match_labels['subdir']:
-        return "Missing spec.selector.match_labels.subdir"
-    if not re.match(r'^[a-z0-9]+$', pvc.spec.selector.match_labels['subdir']):
-        return "Invalid value for pvc.spec.selector.match_labels.subdir"
+        return "Missing spec.selector.match_labels", True
+    file_system_id = get_file_system_id_from_pvc(pvc)
+    if not file_system_id:
+        return "Missing spec.selector.match_labels.file_system_id", True
+    if not file_system_id in EFS_STUNNEL_TARGETS:
+        return "Unable to find file_system_id {}".format(file_system_id), False
+    if not pvc.spec.selector.match_labels.get('volume_name', False):
+        return "Missing spec.selector.match_labels.volume_name", True
+    if not re.match(r'^[a-z0-9]+$', pvc.spec.selector.match_labels['volume_name']):
+        return "Invalid value for pvc.spec.selector.match_labels.volume_name", True
+    if not pvc.spec.selector.match_labels.get('reclaim_policy', 'Delete') in ['Delete','Retain']:
+        return "Invalid value for pvc.spec.selector.match_labels.reclaim_policy", True
 
-    return
+    return False, False
+
+def record_pvc_reject(pvc, reject_reason):
+    if not pvc.metadata.annotations:
+        pvc.metadata.annotations = {}
+    pvc.metadata.annotations['efs-stunnel.gnuthought.com/rejected'] = "true"
+    pvc.metadata.annotations['efs-stunnel.gnuthought.com/reject-reason'] = reject_reason
+    KUBEAPI.replace_namespaced_persistent_volume_claim(
+        pvc.metadata.name,
+        pvc.metadata.namespace,
+        pvc
+    )
 
 def reject_invalid_pvc(pvc):
-    reject_reason = pvc_reject_reason(pvc)
+    reject_reason, record_rejection = pvc_reject_reason(pvc)
+    # FIXME - Create event on reject
     if not reject_reason:
         return
 
-    logging.info("Rejecting pvc {} in {}: {}".format(
+    logging.warn("Rejecting pvc {} in {}: {}".format(
         pvc.metadata.name,
         pvc.metadata.namespace,
         reject_reason
     ))
 
-    KUBEAPI.patch_namespaced_persistent_volume_claim(
-        pvc.metadata.name,
-        pvc.metadata.namespace,
-        {
-            "metadata": {
-                "annotations": {
-                    "efs-stunnel.gnuthought.com/rejected": "true",
-                    "efs-stunnel.gnuthought.com/reject-reason": reject_reason
-                }
-            }
-        }
-    )
+    if record_rejection:
+        record_pvc_reject(pvc, reject_reason)
     return True
 
 def start_mountpoint_worker(worker_name, file_system_id, path, command):
@@ -304,6 +340,7 @@ def start_mountpoint_worker(worker_name, file_system_id, path, command):
                 containers = [ kubernetes.client.V1Container(
                     name = "worker",
                     image = WORKER_IMAGE,
+                    image_pull_policy = "IfNotPresent",
                     command = [
                         "/bin/sh",
                         "-c",
@@ -368,7 +405,7 @@ def initialize_pv_mountpoint(file_system_id, path):
         file_system_id,
         path,
         'init',
-        'mkdir /efs{0}; chmod 777 /efs{0}'.format(path)
+        'mkdir -p /efs{0}; chmod 777 /efs{0}'.format(path)
     )
 
 def remove_pv_mountpoint(file_system_id, path):
@@ -384,13 +421,15 @@ def create_pv_for_pvc(pvc):
     or reject_invalid_pvc(pvc):
         return
 
-    file_system_id = pvc.spec.selector.match_labels['file_system_id']
+    file_system_id = get_file_system_id_from_pvc(pvc)
+
     namespace = pvc.metadata.namespace
-    subdir = pvc.spec.selector.match_labels['subdir']
-    path = '/{}/{}'.format(pvc.metadata.namespace, subdir)
-    pv_name = "efs-stunnel-{}-{}-{}".format(
+    volume_name = pvc.spec.selector.match_labels['volume_name']
+    path = '/{}/{}'.format(pvc.metadata.namespace, volume_name)
+    pv_name = "efs-stunnel-{}-{}-{}-{}".format(
         file_system_id,
-        subdir,
+        pvc.metadata.namespace,
+        volume_name,
         ''.join(random.sample(string.lowercase+string.digits, 5))
     )
 
@@ -401,7 +440,8 @@ def create_pv_for_pvc(pvc):
             name = pv_name,
             labels = pvc.spec.selector.match_labels,
             annotations = {
-                "pv.kubernetes.io/provisioned-by": "gnuthought.com/efs-stunnel"
+                "pv.kubernetes.io/provisioned-by": STORAGE_PROVISIONER,
+                "efs-stunnel.gnuthought.com/file-system-id": file_system_id
             }
         ),
         spec = kubernetes.client.V1PersistentVolumeSpec(
@@ -424,7 +464,7 @@ def create_pv_for_pvc(pvc):
                 path = path,
                 server = '127.0.0.1'
             ),
-            persistent_volume_reclaim_policy = 'Delete',
+            persistent_volume_reclaim_policy = pvc.spec.selector.match_labels.get('reclaim_policy', 'Delete'),
             storage_class_name = pvc.spec.storage_class_name
         )
     ))
@@ -456,28 +496,23 @@ def manage_persistentvolumeclaims():
     ):
         pvc = event['object']
         if event['type'] in ['ADDED','MODIFIED'] \
-        and pvc.spec.storage_class_name == STORAGE_CLASS_NAME \
+        and pvc.spec.storage_class_name in STORAGE_CLASSES \
         and pvc.status.phase == 'Pending' \
         and not pvc.spec.volume_name \
         and not pvc_is_root(pvc) \
         and not pvc_has_been_rejected(pvc):
             create_pv_for_pvc(pvc)
 
-def manage_persistentvolumeclaims_loop():
-    while True:
-        try:
-            manage_persistentvolumeclaims()
-        except Exception as e:
-            logging.error("Error in manage_persistentvolumeclaims_loop: " + str(e))
-            time.sleep(60)
+def clean_persistentvolume(pv):
+    logging.info("Cleaning persistent volume {}".format(pv.metadata.name))
+    remove_pv_mountpoint(
+        pv.metadata.annotations['efs-stunnel.gnuthought.com/file-system-id'],
+        pv.spec.nfs.path
+    )
 
 def delete_persistentvolume(pv):
     logging.info("Deleting persistent volume {}".format(pv.metadata.name))
     KUBEAPI.delete_persistent_volume(pv.metadata.name, {})
-    remove_pv_mountpoint(
-        pv.metadata.labels['file_system_id'],
-        pv.spec.nfs.path
-    )
 
 def manage_persistentvolumes():
     w = kubernetes.watch.Watch()
@@ -486,24 +521,59 @@ def manage_persistentvolumes():
     ):
         pv = event['object']
         if event['type'] in ['ADDED','MODIFIED'] \
-        and pv.spec.storage_class_name == STORAGE_CLASS_NAME \
-        and pv.spec.persistent_volume_reclaim_policy == 'Delete' \
+        and pv.spec.storage_class_name in STORAGE_CLASSES \
         and pv.status.phase == 'Released' \
         and not pv.metadata.deletion_timestamp:
+            if pv.spec.persistent_volume_reclaim_policy == 'Delete':
+                clean_persistentvolume(pv)
             delete_persistentvolume(pv)
+
+def register_storageclass(sc):
+    STORAGE_CLASSES[sc.metadata.name] = {
+        "default_file_system_id": sc.parameters.get('default_file_system_id', None) if sc.parameters else None,
+        'file_system_ids': sc.parameters.get('file_system_ids', None) if sc.parameters else None
+    }
+
+def manage_storageclasses():
+    w = kubernetes.watch.Watch()
+    for event in w.stream(
+        STORAGEAPI.list_storage_class
+    ):
+        sc = event['object']
+        if event['type'] in ['ADDED','MODIFIED'] \
+        and sc.provisioner == STORAGE_PROVISIONER \
+        and not sc.metadata.deletion_timestamp:
+            register_storageclass(sc)
+
+def manage_persistentvolumeclaims_loop():
+    while True:
+        try:
+            manage_persistentvolumeclaims()
+        except Exception as e:
+            logging.exception("Error in manage_persistentvolumeclaims_loop: " + str(e))
+            time.sleep(60)
 
 def manage_persistentvolumes_loop():
     while True:
         try:
             manage_persistentvolumes()
         except Exception as e:
-            logging.error("Error in manage_persistentvolumes_loop: " + str(e))
+            logging.exception("Error in manage_persistentvolumes_loop: " + str(e))
+            time.sleep(60)
+
+def manage_storageclasses_loop():
+    while True:
+        try:
+            manage_storageclasses()
+        except Exception as e:
+            logging.exception("Error in manage_storageclasses_loop: " + str(e))
             time.sleep(60)
 
 def main():
     set_globals()
     threading.Thread(target=manage_persistentvolumeclaims_loop).start()
     threading.Thread(target=manage_persistentvolumes_loop).start()
+    threading.Thread(target=manage_storageclasses_loop).start()
     manage_stunnel_loop()
 
 if __name__ == '__main__':

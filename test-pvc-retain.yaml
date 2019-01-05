@@ -4,7 +4,7 @@ kind: PersistentVolumeClaim
 metadata:
   finalizers:
   - kubernetes.io/pvc-protection
-  name: efs-stunnel-test
+  name: efs-stunnel-test-retain
 spec:
   accessModes:
   - ReadWriteMany
@@ -14,4 +14,5 @@ spec:
   selector:
     matchLabels:
       volume_name: test
+      reclaim_policy: Retain
   storageClassName: efs-stunnel

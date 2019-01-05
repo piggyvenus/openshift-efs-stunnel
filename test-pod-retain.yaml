@@ -6,7 +6,7 @@ metadata:
     deployment: docker-registry-1
     deploymentconfig: docker-registry
     docker-registry: default
-  name: efs-stunnel-test
+  name: efs-stunnel-test-retain
 spec:
   containers:
   - name: test
@@ -29,4 +29,4 @@ spec:
   volumes:
   - name: efs-stunnel-test
     persistentVolumeClaim:
-      claimName: efs-stunnel-test
+      claimName: efs-stunnel-test-retain
