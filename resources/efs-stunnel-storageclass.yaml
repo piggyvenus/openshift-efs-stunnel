@@ -6,4 +6,4 @@ metadata:
 provisioner: gnuthought.com/efs-stunnel
 parameters:
   default_file_system_id: auto
-reclaimPolicy: Retain
+reclaimPolicy: Delete

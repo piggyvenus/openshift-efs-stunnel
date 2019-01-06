@@ -165,7 +165,7 @@ def create_root_pv(file_system_id, stunnel_port, pvc):
                     path = '/',
                     server = '127.0.0.1'
                 ),
-                persistent_volume_reclaim_policy = 'Delete',
+                persistent_volume_reclaim_policy = 'Retain',
                 storage_class_name = "efs-stunnel-system"
             )
         )
@@ -332,12 +332,12 @@ def get_file_system_id_from_pvc(pvc):
 
     file_system_id = pvc.spec.selector.match_labels.get('file_system_id', None)
     if not file_system_id:
-        if sc['default_file_system_id']:
+        if 'default_file_system_id' in sc:
             file_system_id = sc['default_file_system_id']
         else:
             return None
 
-    if sc['file_system_ids']:
+    if 'file_system_ids' in sc:
         # Restrict access to efs to specific volumes
         if file_system_id == 'auto':
             return sc['file_system_ids'][0]
@@ -366,7 +366,7 @@ def pvc_reject_reason(pvc):
         return "Unable to find file_system_id {}".format(file_system_id), False
     if not pvc.spec.selector.match_labels.get('volume_name', False):
         return "Missing spec.selector.match_labels.volume_name", True
-    if not re.match(r'^[a-z0-9]+$', pvc.spec.selector.match_labels['volume_name']):
+    if not re.match(r'^[a-z0-9_]+$', pvc.spec.selector.match_labels['volume_name']):
         return "Invalid value for pvc.spec.selector.match_labels.volume_name", True
     if not pvc.spec.selector.match_labels.get('reclaim_policy', 'Delete') in ['Delete','Retain']:
         return "Invalid value for pvc.spec.selector.match_labels.reclaim_policy", True
@@ -559,7 +559,10 @@ def create_pv_for_pvc(pvc):
                     path = path,
                     server = '127.0.0.1'
                 ),
-                persistent_volume_reclaim_policy = pvc.spec.selector.match_labels.get('reclaim_policy', 'Delete'),
+                persistent_volume_reclaim_policy = pvc.spec.selector.match_labels.get(
+                    'reclaim_policy',
+                    storage_classes[pvc.spec.storage_class_name]['reclaim_policy']
+                ),
                 storage_class_name = pvc.spec.storage_class_name
             )
         )
@@ -636,12 +639,17 @@ def manage_persistent_volumes():
 
 def register_storage_class(sc):
     """Add storage class to storage_classes global valiable."""
-    storage_classes[sc.metadata.name] = {
-        "default_file_system_id":
-            sc.parameters.get('default_file_system_id', None) if sc.parameters else None,
-        'file_system_ids':
-            sc.parameters.get('file_system_ids', None) if sc.parameters else None
+    storage_class = {
+        'reclaim_policy': sc.reclaim_policy
     }
+
+    if sc.parameters:
+        if 'default_file_system_id' in sc.parameters:
+            storage_class['default_file_system_id'] = sc.parameters['default_file_system_id']
+        if 'file_system_ids' in sc.parameters:
+            storage_class['file_system_ids'] = sc.parameters['file_system_ids'].split(',')
+
+    storage_classes[sc.metadata.name] = storage_class
 
 def manage_storage_classes():
     """Storage class watch loop."""
