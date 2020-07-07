@@ -9,6 +9,7 @@ RUN yum install -y \
     yum clean all
 
 RUN easy_install pip && \
+    pip install setuptools --upgrade && \
     pip install --ignore-installed \
       awscli \
       boto3 \
