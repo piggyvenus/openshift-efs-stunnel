@@ -1,5 +1,5 @@
 FROM registry.access.redhat.com/rhel7:latest
-ARG STUNNEL_ARCHIVE_URL=https://www.stunnel.org/downloads/stunnel-5.50.tar.gz
+ARG STUNNEL_ARCHIVE_URL=ftp://ftp.stunnel.org/stunnel/archive/5.x/stunnel-5.50.tar.gz
 
 USER 0
 
@@ -24,6 +24,7 @@ RUN cd /usr/local/src && \
     rm -rf stunnel-*/
 
 RUN easy_install pip && \
+    pip install setuptools --upgrade && \
     pip install --ignore-installed \
       awscli \
       kubernetes
