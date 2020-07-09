@@ -21,7 +21,7 @@ provision_backoff = {}
 provision_backoff_interval = int(os.environ.get('PROVISION_BACKOFF_INTERVAL', 60))
 storage_classes = {}
 storage_provisioner_name = os.environ.get('STORAGE_PROVISIONER_NAME', 'gnuthought.com/efs-stunnel')
-worker_image = os.environ.get('WORKER_IMAGE', 'rhel7:latest')
+worker_image = os.environ.get('WORKER_IMAGE', 'docker-registry.default.svc:5000/openshift/rhel7:latest')
 
 def init():
     """Initialization function before management loops."""
@@ -40,7 +40,7 @@ def init_logging():
         format='%(asctime)-15s %(levelname)s %(message)s',
     )
     logger = logging.getLogger('efs-manager')
-    logger.setLevel(os.environ.get('LOGGING_LEVEL', 'INFO'))
+    logger.setLevel(os.environ.get('LOGGING_LEVEL', 'DEBUG'))
 
 def init_efs_api():
     """Set efs_api global to communicate with the EFS API for this region."""
@@ -112,6 +112,7 @@ def create_root_pvc(file_system_id, root_key):
     """Create persistent volume claim for the root of the given EFS filesystem
     id.
     """
+    logger.debug("create_root_pvc(): fs id: {} root_key {}".format(file_system_id, root_key))
     return kube_api.create_namespaced_persistent_volume_claim(
         namespace,
         kubernetes.client.V1PersistentVolumeClaim(
@@ -211,8 +212,10 @@ def update_efs_stunnel_targets(efs_targets):
         used_stunnel_ports[efs_stunnel_target['stunnel_port']] = True
 
     file_systems = efs_api.describe_file_systems()
+    logger.debug("update_efs_stunnel_targets(): {}".format(file_systems))
     for file_system in file_systems['FileSystems']:
         file_system_id = file_system['FileSystemId']
+        logger.debug("file_system_id: {}".format(file_system_id))
         mount_target_ip_by_subnet = {}
         if file_system_id in efs_targets:
             efs_stunnel_target = efs_targets[file_system_id]
@@ -221,11 +224,13 @@ def update_efs_stunnel_targets(efs_targets):
             logger.info("New file system id {}".format(file_system_id))
             while next_stunnel_port in used_stunnel_ports:
                 next_stunnel_port += 1
+            logger.debug("efs_stunnel_target: name: {} port: {}".format(file_system['FileSystemId'], next_stunnel_port))
             efs_stunnel_target = {
-                "name": file_system['Name'],
+                "name": file_system['FileSystemId'],
                 "stunnel_port": next_stunnel_port
             }
             next_stunnel_port += 1
+            logger.debug("efs_stunnel: {} ".format(efs_stunnel_target))
             efs_targets[file_system_id] = efs_stunnel_target
             changed = True
 
@@ -244,6 +249,7 @@ def update_efs_stunnel_targets(efs_targets):
                 mount_target_ip_by_subnet[mount_target['SubnetId']] = mount_target['IpAddress']
                 changed = True
 
+    logger.debug("====update_efs_stunnel_targets(): after mount_target {} ".format(efs_stunnel_target))
     for file_system_id, efs_stunnel_target in efs_targets.items():
         if 'not_found' in efs_stunnel_target:
             logger.info("Removing EFS {}".format(file_system-id))
@@ -317,11 +323,14 @@ def check_provision_backoff(pvc):
     """Check if there was a recent attempt to provision a persistent volume
     for the given persistent volume claim. If so, then return a true value.
     """
+    logger.debug("check_provision_backoff(): pvc: {} pvc_uid: {} last_attempt: {}".format(pvc, pvc_ui,last_attempt))
+    logger.debug("check_provision_backoff(): provision_backoff.items: {} ".format(provision_backoff.items))
     for pvc_uid, last_attempt in provision_backoff.items():
         if last_attempt < time.time() - provision_backoff_interval:
             del provision_backoff[pvc_uid]
     ret = pvc.metadata.uid in provision_backoff
     provision_backoff[pvc.metadata.uid] = time.time()
+    logger.debug("check_provision_backoff(): ret: {} ".format(ret))
     return ret
 
 def get_file_system_id_from_pvc(pvc):
@@ -329,8 +338,9 @@ def get_file_system_id_from_pvc(pvc):
     restrictions on file system ids if set on the storage class.
     """
     sc = storage_classes[pvc.spec.storage_class_name]
-
+    logger.debug("get_file_system_id_from_pvc(): {} ".format(sc))
     file_system_id = pvc.spec.selector.match_labels.get('file_system_id', None)
+    logger.debug("get_file_system_id_from_pvc():pvc.spec.selector.match_labels.get-file_system_id: {} ".format(file_system_id))
     if not file_system_id:
         if 'default_file_system_id' in sc:
             file_system_id = sc['default_file_system_id']
@@ -340,8 +350,10 @@ def get_file_system_id_from_pvc(pvc):
     if 'file_system_ids' in sc:
         # Restrict access to efs to specific volumes
         if file_system_id == 'auto':
+            logger.debug("get_file_system_id_from_pvc():file_system_ids-auto {} ".format(file_system_id))
             return sc['file_system_ids'][0]
         elif file_system_id in sc['file_system_ids']:
+            logger.debug("get_file_system_id_from_pvc():file_system_ids {} ".format(file_system_id))
             return file_system_id
         else:
             return None
@@ -391,9 +403,11 @@ def reject_invalid_pvc(pvc):
     """Check if a persistent volume claim should be rejected and process the
     rejection. Return True if rejected.
     """
+    logger.debug("reject_invalid_pvc():pvc: {} reject_reason: {} record_rejection: {}".format(pvc, reject_reason, record_rejection))
     reject_reason, record_rejection = pvc_reject_reason(pvc)
     # FIXME - Create event on reject
     if not reject_reason:
+        logger.debug("reject_invalid_pvc():not reject_reason: {} ".format(reject_reason))
         return
 
     logger.warn("Rejecting pvc {} in {}: {}".format(
@@ -450,16 +464,18 @@ def start_mountpoint_worker(worker_name, file_system_id, path, command):
 
 def delete_worker_pod(worker_name):
     """Delete a worker pod by name."""
+    logger.debug("======delete_worker_pod():worker_name {} namespace {} ".format(worker_name, namespace))
+    delete_options = kubernetes.client.V1DeleteOptions()
     kube_api.delete_namespaced_pod(
-        worker_name,
-        namespace,
-        {}
-    )
+        name=worker_name,
+        namespace=namespace,
+        body=delete_options)
 
 def wait_for_worker_completion(worker_name):
     """Wait for worker to complete and delete if successful. Failed workers
     indicate a misconfiguration or bug and so are left for troubleshooting.
     """
+    logger.debug("wait_for_worker_completion(): worker_name {} ".format(worker_name))
     w = kubernetes.watch.Watch()
     for event in w.stream(
         kube_api.list_namespaced_pod,
@@ -478,19 +494,23 @@ def wait_for_worker_completion(worker_name):
 
 def run_mountpoint_worker(file_system_id, path, action, command):
     """Run a mountpoint worker pod and wait for it to complete."""
+    logger.debug("run_mountpoint_worker()")
     worker_name = "efs-{}-{}{}-{}".format(
         action,
         file_system_id,
         re.sub('[^0-9a-zA-Z]+', '-', path),
         ''.join(random.sample(string.lowercase+string.digits, 5))
     )
+    logger.debug("run_mountpoint_worker():worker_name {} ".format(worker_name))
     start_mountpoint_worker(worker_name, file_system_id, path, command)
+    logger.debug("wait_for_worker_completion()")
     wait_for_worker_completion(worker_name)
 
 def initialize_pv_mountpoint(file_system_id, path):
     """Launch mountpoint worker pod to create a mountpoint within an EFS
     filesystem.
     """
+    logger.debug("initialize_pv_mountpoint()")
     run_mountpoint_worker(
         file_system_id,
         path,
@@ -511,15 +531,20 @@ def remove_pv_mountpoint(file_system_id, path):
 
 def create_pv_for_pvc(pvc):
     """Handle persistent volume creation for a persistent volume claim."""
+    logger.debug("create_pv_for_pv()")
     if check_provision_backoff(pvc) \
     or reject_invalid_pvc(pvc):
         return
 
     file_system_id = get_file_system_id_from_pvc(pvc)
+    logger.debug("create_pv_for_pv(): file_system_id: {}".format(file_system_id))
 
     namespace = pvc.metadata.namespace
+    logger.debug("create_pv_for_pv(): namespace: {}".format(namespace))
     volume_name = pvc.spec.selector.match_labels['volume_name']
+    logger.debug("create_pv_for_pv(): volume_name: {}".format(volume_name))
     path = '/{}/{}'.format(pvc.metadata.namespace, volume_name)
+    logger.debug("create_pv_for_pv(): path: {}".format(path))
     pv_name = "efs-stunnel-{}-{}-{}-{}".format(
         file_system_id,
         pvc.metadata.namespace,
@@ -527,6 +552,7 @@ def create_pv_for_pvc(pvc):
         ''.join(random.sample(string.lowercase+string.digits, 5))
     )
 
+    logger.debug("create_pv_for_pv(): pv_name: {}".format(pv_name))
     initialize_pv_mountpoint(file_system_id, path)
 
     kube_api.create_persistent_volume(
@@ -587,6 +613,7 @@ def pvc_has_been_rejected(pvc):
 def manage_persistent_volume_claims():
     """Watch loop to manage persistent volume claims."""
     # Wait for efs_stunnel_targets to be set
+    logger.debug("manage_persistent_volume_claims()")
     while not efs_stunnel_targets:
         time.sleep(10)
 
@@ -596,6 +623,7 @@ def manage_persistent_volume_claims():
     # reprocess all persistent volume claims so that claims that were rejected
     # because the EFS target did not exist can be picked up later if the EFS
     # target is then discovered.
+    logger.debug("manage_persistent_volume_claims(): kubernetes watch")
     w = kubernetes.watch.Watch()
     for event in w.stream(
         kube_api.list_persistent_volume_claim_for_all_namespaces
@@ -620,7 +648,8 @@ def clean_persistent_volume(pv):
 def delete_persistent_volume(pv):
     """Delete a persistent volume using the kubernetes api."""
     logger.info("Deleting persistent volume {}".format(pv.metadata.name))
-    kube_api.delete_persistent_volume(pv.metadata.name, {})
+    delete_options = kubernetes.client.V1DeleteOptions()
+    kube_api.delete_persistent_volume(name=pv.metadata.name, body=delete_options)
 
 def manage_persistent_volumes():
     """Watch loop to manage persistent volume cleanup when released."""
