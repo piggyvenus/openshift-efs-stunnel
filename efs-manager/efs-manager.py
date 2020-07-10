@@ -205,9 +205,11 @@ def update_efs_stunnel_targets(efs_targets):
     """Update dictionary of EFS stunnel targets and return True if changed."""
     changed = False
     next_stunnel_port = base_stunnel_port
+    logger.debug("update_efs_stunnel_targets(): next_stunnel_port {}".format(next_stunnel_port))
 
     used_stunnel_ports = {}
     for efs_stunnel_target in efs_targets.values():
+        logger.debug("update_efs_stunnel_targets(): efs_stunnel_target {}".format(efs_stunnel_target))
         efs_stunnel_target['not_found'] = True
         used_stunnel_ports[efs_stunnel_target['stunnel_port']] = True
 
@@ -218,28 +220,19 @@ def update_efs_stunnel_targets(efs_targets):
         logger.debug("file_system_id: {}".format(file_system_id))
         mount_target_ip_by_subnet = {}
         if file_system_id in efs_targets:
+            logger.debug("update_efs_stunnel_targets(): if file_system_id in efs_targets {}".format(file_systems))
             efs_stunnel_target = efs_targets[file_system_id]
             del efs_stunnel_target['not_found']
-        else:
-            logger.info("New file system id {}".format(file_system_id))
-            while next_stunnel_port in used_stunnel_ports:
-                next_stunnel_port += 1
-            logger.debug("efs_stunnel_target: name: {} port: {}".format(file_system['FileSystemId'], next_stunnel_port))
-            efs_stunnel_target = {
-                "name": file_system['FileSystemId'],
-                "stunnel_port": next_stunnel_port
-            }
-            next_stunnel_port += 1
-            logger.debug("efs_stunnel: {} ".format(efs_stunnel_target))
-            efs_targets[file_system_id] = efs_stunnel_target
-            changed = True
 
         mount_target_ip_by_subnet = efs_stunnel_target.get('mount_target_ip_by_subnet', None)
+        logger.debug("update_efs_stunnel_targets(): mount_target_ip_by_subnet {}".format(mount_target_ip_by_subnet))
         if not mount_target_ip_by_subnet:
             efs_stunnel_target['mount_target_ip_by_subnet'] = mount_target_ip_by_subnet = {}
 
         mount_targets = efs_api.describe_mount_targets(FileSystemId=file_system['FileSystemId'])
+        logger.debug("update_efs_stunnel_targets(): mount_targets {}".format(mount_targets))
         for mount_target in mount_targets['MountTargets']:
+            logger.debug("update_efs_stunnel_targets(): mount_target in MountTargetss {}".format(mount_targets))
             if mount_target_ip_by_subnet.get(mount_target['SubnetId'],'') != mount_target['IpAddress']:
                 logger.info("Set mount target ip for {} to {} on {}".format(
                     file_system_id,
