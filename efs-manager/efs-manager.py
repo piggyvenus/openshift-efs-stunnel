@@ -323,14 +323,11 @@ def check_provision_backoff(pvc):
     """Check if there was a recent attempt to provision a persistent volume
     for the given persistent volume claim. If so, then return a true value.
     """
-    logger.debug("check_provision_backoff(): pvc: {} pvc_uid: {} last_attempt: {}".format(pvc, pvc_ui,last_attempt))
-    logger.debug("check_provision_backoff(): provision_backoff.items: {} ".format(provision_backoff.items))
     for pvc_uid, last_attempt in provision_backoff.items():
         if last_attempt < time.time() - provision_backoff_interval:
             del provision_backoff[pvc_uid]
     ret = pvc.metadata.uid in provision_backoff
     provision_backoff[pvc.metadata.uid] = time.time()
-    logger.debug("check_provision_backoff(): ret: {} ".format(ret))
     return ret
 
 def get_file_system_id_from_pvc(pvc):
@@ -403,11 +400,9 @@ def reject_invalid_pvc(pvc):
     """Check if a persistent volume claim should be rejected and process the
     rejection. Return True if rejected.
     """
-    logger.debug("reject_invalid_pvc():pvc: {} reject_reason: {} record_rejection: {}".format(pvc, reject_reason, record_rejection))
     reject_reason, record_rejection = pvc_reject_reason(pvc)
     # FIXME - Create event on reject
     if not reject_reason:
-        logger.debug("reject_invalid_pvc():not reject_reason: {} ".format(reject_reason))
         return
 
     logger.warn("Rejecting pvc {} in {}: {}".format(
@@ -464,7 +459,7 @@ def start_mountpoint_worker(worker_name, file_system_id, path, command):
 
 def delete_worker_pod(worker_name):
     """Delete a worker pod by name."""
-    logger.debug("======delete_worker_pod():worker_name {} namespace {} ".format(worker_name, namespace))
+    logger.debug("delete_worker_pod():worker_name {} namespace {} ".format(worker_name, namespace))
     delete_options = kubernetes.client.V1DeleteOptions()
     kube_api.delete_namespaced_pod(
         name=worker_name,
