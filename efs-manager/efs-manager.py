@@ -22,6 +22,7 @@ provision_backoff_interval = int(os.environ.get('PROVISION_BACKOFF_INTERVAL', 60
 storage_classes = {}
 storage_provisioner_name = os.environ.get('STORAGE_PROVISIONER_NAME', 'gnuthought.com/efs-stunnel')
 worker_image = os.environ.get('WORKER_IMAGE', 'docker-registry.default.svc:5000/openshift/rhel7:latest')
+root_pv_done = False
 
 def init():
     """Initialization function before management loops."""
@@ -93,7 +94,8 @@ def create_root_pvs_and_pvcs(conf_efs_stunnel_targets):
                 file_system_id,
                 efs_stunnel_target['stunnel_port']
             )
-
+        root_pv_done = True
+        
 def create_root_pv_and_pvc(file_system_id, stunnel_port):
     """Create persistent volume and persistent volume claim for the root of a
     given EFS filesystem id using the given stunnel port for access.
@@ -189,68 +191,14 @@ def manage_stunnel_conf():
     config_map = get_config_map()
     conf_efs_stunnel_targets = get_config_map_efs_stunnel_targets(config_map)
 
-    if update_efs_stunnel_targets(conf_efs_stunnel_targets):
+    if not root_pv_done:
         create_root_pvs_and_pvcs(conf_efs_stunnel_targets)
         efs_stunnel_targets = conf_efs_stunnel_targets
 
-        if config_map:
-            update_config_map()
-        else:
-            create_config_map()
-    elif not efs_stunnel_targets:
+    if not efs_stunnel_targets:
         # Initialize efs_stunnel_targets if not set
         efs_stunnel_targets = conf_efs_stunnel_targets
 
-def update_efs_stunnel_targets(efs_targets):
-    """Update dictionary of EFS stunnel targets and return True if changed."""
-    changed = False
-    next_stunnel_port = base_stunnel_port
-    logger.debug("update_efs_stunnel_targets(): next_stunnel_port {}".format(next_stunnel_port))
-
-    used_stunnel_ports = {}
-    for efs_stunnel_target in efs_targets.values():
-        logger.debug("update_efs_stunnel_targets(): efs_stunnel_target {}".format(efs_stunnel_target))
-        efs_stunnel_target['not_found'] = True
-        used_stunnel_ports[efs_stunnel_target['stunnel_port']] = True
-
-    file_systems = efs_api.describe_file_systems()
-    logger.debug("update_efs_stunnel_targets(): {}".format(file_systems))
-    for file_system in file_systems['FileSystems']:
-        file_system_id = file_system['FileSystemId']
-        logger.debug("file_system_id: {}".format(file_system_id))
-        mount_target_ip_by_subnet = {}
-        if file_system_id in efs_targets:
-            logger.debug("update_efs_stunnel_targets(): if file_system_id in efs_targets {}".format(file_systems))
-            efs_stunnel_target = efs_targets[file_system_id]
-            del efs_stunnel_target['not_found']
-
-        mount_target_ip_by_subnet = efs_stunnel_target.get('mount_target_ip_by_subnet', None)
-        logger.debug("update_efs_stunnel_targets(): mount_target_ip_by_subnet {}".format(mount_target_ip_by_subnet))
-        if not mount_target_ip_by_subnet:
-            efs_stunnel_target['mount_target_ip_by_subnet'] = mount_target_ip_by_subnet = {}
-
-        mount_targets = efs_api.describe_mount_targets(FileSystemId=file_system['FileSystemId'])
-        logger.debug("update_efs_stunnel_targets(): mount_targets {}".format(mount_targets))
-        for mount_target in mount_targets['MountTargets']:
-            logger.debug("update_efs_stunnel_targets(): mount_target in MountTargetss {}".format(mount_targets))
-            if mount_target_ip_by_subnet.get(mount_target['SubnetId'],'') != mount_target['IpAddress']:
-                logger.info("Set mount target ip for {} to {} on {}".format(
-                    file_system_id,
-                    mount_target['IpAddress'],
-                    mount_target['SubnetId']
-                ))
-                mount_target_ip_by_subnet[mount_target['SubnetId']] = mount_target['IpAddress']
-                changed = True
-
-    logger.debug("====update_efs_stunnel_targets(): after mount_target {} ".format(efs_stunnel_target))
-    for file_system_id, efs_stunnel_target in efs_targets.items():
-        if 'not_found' in efs_stunnel_target:
-            logger.info("Removing EFS {}".format(file_system-id))
-            del efs_targets[file_system_id]
-            remove_root_pvc(file_system_id)
-            changed = True
-
-    return changed
 
 def get_config_map():
     """Return efs-stunnel config map if it exists."""
