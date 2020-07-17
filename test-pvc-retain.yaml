@@ -13,6 +13,7 @@ spec:
       storage: 1Gi
   selector:
     matchLabels:
-      volume_name: test
+      volume_name: testretain
+      file_system_id: fs-ac89d3b5
       reclaim_policy: Retain
   storageClassName: efs-stunnel

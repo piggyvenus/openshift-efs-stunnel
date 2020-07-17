@@ -14,7 +14,7 @@ spec:
     - /bin/sh
     - -c
     - while true; do sleep 1000; done
-    image: rhel7:latest
+    image: docker-registry.default.svc:5000/openshift/rhel7:latest
     imagePullPolicy: IfNotPresent
     ports:
     - containerPort: 5000

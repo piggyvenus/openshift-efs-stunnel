@@ -125,7 +125,7 @@ objects:
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
         nodeSelector:
-          node-role.kubernetes.io/infra: "true"
+          app: "stunnel"
         restartPolicy: Always
         securityContext: {}
         serviceAccount: efs-manager
@@ -263,5 +263,5 @@ objects:
     name: efs-stunnel
   provisioner: gnuthought.com/efs-stunnel
   parameters:
-    default_file_system_id: auto
+    file_system_ids: <PLEASE_ENTERY YOUR EFS FILESYSTEM ID HERE>
   reclaimPolicy: Delete

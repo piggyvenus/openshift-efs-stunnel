@@ -5,5 +5,5 @@ metadata:
   name: efs-stunnel
 provisioner: gnuthought.com/efs-stunnel
 parameters:
-  default_file_system_id: auto
+  file_system_ids: fs-cb6b31d2,fs-ac89d3b5
 reclaimPolicy: Delete
