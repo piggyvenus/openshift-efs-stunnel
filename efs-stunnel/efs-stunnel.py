@@ -8,7 +8,7 @@ import requests
 import signal
 import subprocess
 import yaml
-
+import time
 import urllib3
 # Disable warnings when connecting to the kubernetes API
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
